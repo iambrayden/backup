@@ -1,0 +1,8 @@
+{$PLATFORM_DOMAIN} {
+    route /api/* {
+        reverse_proxy api:8080
+    }
+    route {
+        reverse_proxy web:3000
+    }
+}
