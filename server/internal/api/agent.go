@@ -40,6 +40,30 @@ func (s *Server) handleGetDEK(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+const maxChunkBatchSize = 1000
+
+func isValidChunkHash(h string) bool {
+	if len(h) != 64 {
+		return false
+	}
+	for _, c := range h {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) handleAgentCreateJob(w http.ResponseWriter, r *http.Request) {
+	dev := deviceFromCtx(r)
+	job, err := s.db.CreateBackupJob(r.Context(), dev.ID, dev.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create job: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"job_id": job.ID})
+}
+
 func (s *Server) handleChunkCheck(w http.ResponseWriter, r *http.Request) {
 	dev := deviceFromCtx(r)
 
@@ -48,6 +72,11 @@ func (s *Server) handleChunkCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	if len(req.Hashes) > maxChunkBatchSize {
+		writeError(w, http.StatusBadRequest, "too many hashes")
 		return
 	}
 
@@ -80,6 +109,11 @@ func (s *Server) handleChunkConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	if !isValidChunkHash(req.Hash) {
+		writeError(w, http.StatusBadRequest, "invalid hash")
 		return
 	}
 
@@ -232,6 +266,11 @@ func (s *Server) handleChunkPresign(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	if !isValidChunkHash(req.Hash) {
+		writeError(w, http.StatusBadRequest, "invalid hash")
 		return
 	}
 

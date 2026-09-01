@@ -44,14 +44,15 @@ func main() {
 		log.Fatal("bootstrap", zap.Error(err))
 	}
 
-	srv := api.NewServer(database, cfg.JWTSecret, cfg.MasterKey, log)
+	srv := api.NewServer(database, cfg.JWTSecret, cfg.MasterKey, log, cfg.CORSOrigins)
 
 	httpServer := &http.Server{
-		Addr:         cfg.HTTPAddr,
-		Handler:      srv.Router(),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:              cfg.HTTPAddr,
+		Handler:           srv.Router(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -69,7 +70,9 @@ func main() {
 
 	shutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	httpServer.Shutdown(shutCtx)
+	if err := httpServer.Shutdown(shutCtx); err != nil {
+		log.Error("shutdown", zap.Error(err))
+	}
 }
 
 func bootstrap(ctx context.Context, database *db.DB, cfg *config.Config, log *zap.Logger) error {
