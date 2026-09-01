@@ -44,12 +44,12 @@ type Result struct {
 	ChunksDeduped  int
 }
 
-type fileWork struct {
-	path   string
-	size   int64
-	mtime  time.Time
-	mode   fs.FileMode
-	chunks []chunker.Chunk
+type fileInfo struct {
+	path       string
+	size       int64
+	mtime      time.Time
+	mode       fs.FileMode
+	chunkHexes []string
 }
 
 func (e *Engine) Run(ctx context.Context, jobID string) (*Result, error) {
@@ -62,12 +62,16 @@ func (e *Engine) Run(ctx context.Context, jobID string) (*Result, error) {
 		return nil, fmt.Errorf("decode dek: %w", err)
 	}
 
-	entries, result, err := e.processPath(ctx, dek, jobID)
+	entries, result, err := e.collectHashes(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	snapshotID, err := e.client.CreateSnapshot(jobID, entries)
+	if err := e.uploadMissing(ctx, dek, result, entries); err != nil {
+		return nil, err
+	}
+
+	snapshotID, err := e.client.CreateSnapshot(jobID, manifestEntries(entries))
 	if err != nil {
 		return nil, fmt.Errorf("create snapshot: %w", err)
 	}
@@ -75,29 +79,17 @@ func (e *Engine) Run(ctx context.Context, jobID string) (*Result, error) {
 	return result, nil
 }
 
-func (e *Engine) processPath(ctx context.Context, dek []byte, jobID string) ([]client.FileManifestEntry, *Result, error) {
+func (e *Engine) collectHashes(ctx context.Context) ([]*fileInfo, *Result, error) {
 	result := &Result{}
-	var entries []client.FileManifestEntry
-	var files []fileWork
-	allHashes := map[string]bool{}
+	var files []*fileInfo
 
 	err := filepath.WalkDir(e.watchPath, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			e.log.Warn("walk", zap.String("path", path), zap.Error(walkErr))
 			return nil
 		}
-
-		relPath := absPath(path)
-		parentPath, name := splitPath(relPath)
-
 		if d.IsDir() {
-			entries = append(entries, client.FileManifestEntry{
-				Path:        relPath + "/",
-				ParentPath:  parentPath,
-				Name:        name,
-				IsDir:       true,
-				ChunkHashes: []string{},
-			})
+			files = append(files, &fileInfo{path: path, mode: d.Type()})
 			return nil
 		}
 
@@ -120,31 +112,16 @@ func (e *Engine) processPath(ctx context.Context, dek []byte, jobID string) ([]c
 			return nil
 		}
 
-		var hashes []string
-		for _, ch := range chunks {
-			h := hex.EncodeToString(ch.Hash[:])
-			hashes = append(hashes, h)
-			allHashes[h] = true
+		fi := &fileInfo{
+			path:  path,
+			size:  info.Size(),
+			mtime: info.ModTime(),
+			mode:  info.Mode(),
 		}
-
-		mtime := info.ModTime().UTC().Format(time.RFC3339)
-		entries = append(entries, client.FileManifestEntry{
-			Path:        relPath,
-			ParentPath:  parentPath,
-			Name:        name,
-			Size:        info.Size(),
-			Mtime:       &mtime,
-			Mode:        int(info.Mode()),
-			IsDir:       false,
-			ChunkHashes: hashes,
-		})
-		files = append(files, fileWork{
-			path:   path,
-			size:   info.Size(),
-			mtime:  info.ModTime(),
-			mode:   info.Mode(),
-			chunks: chunks,
-		})
+		for _, ch := range chunks {
+			fi.chunkHexes = append(fi.chunkHexes, hex.EncodeToString(ch.Hash[:]))
+		}
+		files = append(files, fi)
 		result.FileCount++
 		return nil
 	})
@@ -152,27 +129,77 @@ func (e *Engine) processPath(ctx context.Context, dek []byte, jobID string) ([]c
 		return nil, nil, fmt.Errorf("walk: %w", err)
 	}
 
-	allHashSlice := make([]string, 0, len(allHashes))
-	for h := range allHashes {
-		allHashSlice = append(allHashSlice, h)
+	seen := map[string]bool{}
+	for _, fi := range files {
+		for _, h := range fi.chunkHexes {
+			seen[h] = true
+		}
 	}
-	result.ChunksTotal = len(allHashSlice)
+	result.ChunksTotal = len(seen)
 
-	missing, err := e.client.CheckChunks(allHashSlice)
-	if err != nil {
-		return nil, nil, fmt.Errorf("check chunks: %w", err)
-	}
-	result.ChunksDeduped = len(allHashSlice) - len(missing)
+	return files, result, nil
+}
 
+func (e *Engine) uploadMissing(ctx context.Context, dek []byte, result *Result, files []*fileInfo) error {
 	missingSet := map[string]bool{}
-	for _, h := range missing {
-		missingSet[h] = true
+
+	var allHashes []string
+	seen := map[string]bool{}
+	for _, fi := range files {
+		for _, h := range fi.chunkHexes {
+			if !seen[h] {
+				seen[h] = true
+				allHashes = append(allHashes, h)
+			}
+		}
 	}
+
+	const batchSize = 1000
+	for i := 0; i < len(allHashes); i += batchSize {
+		end := i + batchSize
+		if end > len(allHashes) {
+			end = len(allHashes)
+		}
+		missing, err := e.client.CheckChunks(allHashes[i:end])
+		if err != nil {
+			return fmt.Errorf("check chunks: %w", err)
+		}
+		for _, h := range missing {
+			missingSet[h] = true
+		}
+	}
+	result.ChunksDeduped = len(allHashes) - len(missingSet)
 
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 
-	for _, fw := range files {
-		for _, ch := range fw.chunks {
+	for _, fi := range files {
+		if fi.size == 0 || len(fi.chunkHexes) == 0 {
+			continue
+		}
+
+		needsUpload := false
+		for _, h := range fi.chunkHexes {
+			if missingSet[h] {
+				needsUpload = true
+				break
+			}
+		}
+		if !needsUpload {
+			continue
+		}
+
+		f, err := os.Open(fi.path)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", fi.path, err)
+		}
+
+		chunks, err := chunker.ChunkReader(f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("chunk %s: %w", fi.path, err)
+		}
+
+		for _, ch := range chunks {
 			h := hex.EncodeToString(ch.Hash[:])
 			if !missingSet[h] {
 				continue
@@ -180,36 +207,68 @@ func (e *Engine) processPath(ctx context.Context, dek []byte, jobID string) ([]c
 
 			encrypted, err := crypto.EncryptChunk(dek, ch.Hash, ch.Data)
 			if err != nil {
-				return nil, nil, fmt.Errorf("encrypt chunk %s: %w", h, err)
+				return fmt.Errorf("encrypt chunk %s: %w", h, err)
 			}
 
 			presignURL, objectKey, err := e.client.GetPresignURL(h)
 			if err != nil {
-				return nil, nil, fmt.Errorf("presign %s: %w", h, err)
+				return fmt.Errorf("presign %s: %w", h, err)
 			}
 
 			putReq, err := http.NewRequestWithContext(ctx, "PUT", presignURL, bytes.NewReader(encrypted))
 			if err != nil {
-				return nil, nil, err
+				return err
 			}
 			putResp, err := httpClient.Do(putReq)
 			if err != nil {
-				return nil, nil, fmt.Errorf("upload chunk %s: %w", h, err)
+				return fmt.Errorf("upload chunk %s: %w", h, err)
 			}
 			putResp.Body.Close()
 			if putResp.StatusCode >= 400 {
-				return nil, nil, fmt.Errorf("upload chunk %s: HTTP %d", h, putResp.StatusCode)
+				return fmt.Errorf("upload chunk %s: HTTP %d", h, putResp.StatusCode)
 			}
 
 			if err := e.client.ConfirmChunk(h, int64(len(ch.Data)), int64(len(encrypted)), objectKey); err != nil {
-				return nil, nil, fmt.Errorf("confirm chunk %s: %w", h, err)
+				return fmt.Errorf("confirm chunk %s: %w", h, err)
 			}
 
+			delete(missingSet, h)
 			result.ChunksUploaded++
 		}
 	}
+	return nil
+}
 
-	return entries, result, nil
+func manifestEntries(files []*fileInfo) []client.FileManifestEntry {
+	entries := make([]client.FileManifestEntry, 0, len(files))
+	for _, fi := range files {
+		relPath := absPath(fi.path)
+		parentPath, name := splitPath(relPath)
+
+		if fi.size == 0 && len(fi.chunkHexes) == 0 {
+			entries = append(entries, client.FileManifestEntry{
+				Path:        relPath + "/",
+				ParentPath:  parentPath,
+				Name:        name,
+				IsDir:       true,
+				ChunkHashes: []string{},
+			})
+			continue
+		}
+
+		mtime := fi.mtime.UTC().Format(time.RFC3339)
+		entries = append(entries, client.FileManifestEntry{
+			Path:        relPath,
+			ParentPath:  parentPath,
+			Name:        name,
+			Size:        fi.size,
+			Mtime:       &mtime,
+			Mode:        int(fi.mode),
+			IsDir:       false,
+			ChunkHashes: fi.chunkHexes,
+		})
+	}
+	return entries
 }
 
 func absPath(path string) string {

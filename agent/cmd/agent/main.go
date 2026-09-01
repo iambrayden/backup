@@ -16,9 +16,9 @@ import (
 
 func main() {
 	var (
-		configPath = flag.String("config", defaultConfigPath(), "config file path")
-		doEnroll   = flag.Bool("enroll", false, "enroll this device and exit")
-		doBackup   = flag.Bool("backup-now", false, "run one backup cycle and exit")
+		configPath  = flag.String("config", defaultConfigPath(), "config file path")
+		enrollToken = flag.String("enroll", "", "enrollment token (runs enrollment and exits)")
+		doBackup    = flag.Bool("backup-now", false, "run one backup cycle and exit")
 	)
 	flag.Parse()
 
@@ -30,7 +30,8 @@ func main() {
 		log.Fatal("load config", zap.Error(err))
 	}
 
-	if *doEnroll {
+	if *enrollToken != "" {
+		cfg.EnrollToken = *enrollToken
 		if err := enrollDevice(cfg, log); err != nil {
 			log.Fatal("enroll", zap.Error(err))
 		}
@@ -90,8 +91,13 @@ func enrollDevice(cfg *config.Config, log *zap.Logger) error {
 }
 
 func runBackup(ctx context.Context, cfg *config.Config, c *client.Client, log *zap.Logger) error {
+	jobID, err := c.CreateJob()
+	if err != nil {
+		return fmt.Errorf("create job: %w", err)
+	}
+
 	engine := backup.New(c, cfg.WatchPath, log)
-	result, err := engine.Run(ctx, "")
+	result, err := engine.Run(ctx, jobID)
 	if err != nil {
 		return err
 	}

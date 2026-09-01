@@ -38,6 +38,10 @@ func Open(ctx context.Context, dsn string) (*DB, error) {
 	return &DB{Pool: pool}, nil
 }
 
+func (d *DB) Ping(ctx context.Context) error {
+	return d.Pool.Ping(ctx)
+}
+
 func (d *DB) Migrate(dsn string) error {
 	goose.SetBaseFS(migrationsFS)
 	if err := goose.SetDialect("postgres"); err != nil {

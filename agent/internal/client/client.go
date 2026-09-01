@@ -142,6 +142,16 @@ func (c *Client) CreateSnapshot(jobID string, entries []FileManifestEntry) (stri
 	return resp.ID, nil
 }
 
+func (c *Client) CreateJob() (string, error) {
+	var resp struct {
+		JobID string `json:"job_id"`
+	}
+	if err := c.do("POST", "/api/v1/agent/jobs", map[string]string{}, &resp); err != nil {
+		return "", err
+	}
+	return resp.JobID, nil
+}
+
 func (c *Client) GetPresignURL(hash string) (presignURL, objectKey string, err error) {
 	var resp struct {
 		PresignURL string `json:"presign_url"`

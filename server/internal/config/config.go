@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -12,19 +13,36 @@ type Config struct {
 	MasterKey      []byte
 	JWTSecret      []byte
 	PlatformDomain string
+	CORSOrigins    []string
 	AdminEmail     string
 	AdminPassword  string
 	HTTPAddr       string
 }
 
 func Load() (*Config, error) {
+	domain := env("PLATFORM_DOMAIN", "localhost")
+
 	c := &Config{
 		DatabaseURL:    env("DATABASE_URL", "postgres://backup:backup@localhost:5432/backup?sslmode=disable"),
 		RedisURL:       env("REDIS_URL", "redis://localhost:6379/0"),
-		PlatformDomain: env("PLATFORM_DOMAIN", "localhost"),
+		PlatformDomain: domain,
 		AdminEmail:     env("ADMIN_EMAIL", "admin@example.com"),
 		AdminPassword:  env("ADMIN_PASSWORD", "changeme"),
 		HTTPAddr:       env("HTTP_ADDR", ":8080"),
+	}
+
+	if raw := os.Getenv("CORS_ORIGINS"); raw != "" {
+		for _, o := range strings.Split(raw, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				c.CORSOrigins = append(c.CORSOrigins, o)
+			}
+		}
+	} else {
+		c.CORSOrigins = []string{
+			"https://" + domain,
+			"http://localhost",
+			"http://localhost:3000",
+		}
 	}
 
 	mk, err := decodeKey("MASTER_KEY")
