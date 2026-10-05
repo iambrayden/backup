@@ -32,22 +32,29 @@ local function getIdentifier(src)
     return GetPlayerIdentifierByType(src, 'license2') or GetPlayerIdentifierByType(src, 'license')
 end
 
---- Returns year, current calendar day, and phase ('before' | 'active' | 'after').
+--- Returns year, calendar day index, and phase ('before' | 'active' | 'after').
+--- The index counts days from day 1 of Config.Month, so it is <= 0 before the
+--- calendar opens and > TOTAL_DAYS after it ends (e.g. 32 on November 1st).
 local function calendarNow()
     local t = os.date('*t')
     local year = Config.Year or t.year
 
+    local index
     if Config.DebugDay then
-        return year, Config.DebugDay, 'active'
+        index = Config.DebugDay
+    else
+        -- Compare at noon so daylight saving changes can't shift the day count.
+        local todayNoon = os.time({ year = t.year, month = t.month, day = t.day, hour = 12 })
+        local startNoon = os.time({ year = year, month = Config.Month, day = 1, hour = 12 })
+        index = math.floor((todayNoon - startNoon) / 86400 + 0.5) + 1
     end
 
-    if t.year < year or (t.year == year and t.month < Config.Month) then
-        return year, 0, 'before'
-    end
-    if t.year > year or t.month > Config.Month then
-        return year, TOTAL_DAYS, 'after'
-    end
-    return year, math.min(t.day, TOTAL_DAYS), 'active'
+    local phase = index < 1 and 'before' or index > TOTAL_DAYS and 'after' or 'active'
+    return year, index, phase
+end
+
+local function graceDays()
+    return math.max(0, Config.GraceDays or 0)
 end
 
 local function getClaims(identifier, year)
@@ -62,13 +69,12 @@ local function getClaims(identifier, year)
     return claimed
 end
 
-local function dayStatus(day, today, phase, claimed)
+--- A day is claimable on its own day and for Config.GraceDays days after.
+local function dayStatus(day, index, claimed)
     if claimed[day] then return 'claimed' end
-    if phase == 'before' then return 'locked' end
-    if phase == 'after' then return 'missed' end
-    if day > today then return 'locked' end
-    if day == today then return 'available' end
-    return Config.AllowCatchUp and 'available' or 'missed'
+    if day > index then return 'locked' end
+    if index - day <= graceDays() then return 'available' end
+    return 'missed'
 end
 
 local function describeRewards(rewards)
@@ -93,34 +99,30 @@ local function buildState(src)
     local identifier = getIdentifier(src)
     if not identifier then return nil end
 
-    local year, today, phase = calendarNow()
+    local year, index, phase = calendarNow()
     local claimed = getClaims(identifier, year)
 
     local days = {}
     for day = 1, TOTAL_DAYS do
         days[day] = {
             day = day,
-            status = dayStatus(day, today, phase, claimed),
+            status = dayStatus(day, index, claimed),
             rewards = describeRewards(Config.Days[day]),
         }
     end
 
     local nextUnlock
-    if not Config.DebugDay then
-        if phase == 'before' then
-            nextUnlock = os.time({ year = year, month = Config.Month, day = 1, hour = 0 })
-        elseif phase == 'active' and today < TOTAL_DAYS then
-            nextUnlock = os.time({ year = year, month = Config.Month, day = today + 1, hour = 0 })
-        end
+    if not Config.DebugDay and index < TOTAL_DAYS then
+        nextUnlock = os.time({ year = year, month = Config.Month, day = math.max(index, 0) + 1, hour = 0 })
     end
 
     return {
         now = os.time(),
         halloween = os.time({ year = year, month = Config.Month, day = TOTAL_DAYS, hour = 0 }),
         nextUnlock = nextUnlock,
-        today = today,
+        today = index,
         phase = phase,
-        catchUp = Config.AllowCatchUp,
+        graceDays = graceDays(),
         days = days,
     }
 end
@@ -175,15 +177,15 @@ local function claim(src, day)
         return { ok = false, message = 'Could not find your identifier.' }
     end
 
-    local year, today, phase = calendarNow()
+    local year, index = calendarNow()
     local claimed = getClaims(identifier, year)
-    local status = dayStatus(day, today, phase, claimed)
+    local status = dayStatus(day, index, claimed)
 
     if status ~= 'available' then
         local reasons = {
             claimed = 'You already claimed this treat.',
             locked = 'This treat has not unlocked yet.',
-            missed = 'This treat can no longer be claimed.',
+            missed = 'This treat has expired.',
         }
         return { ok = false, message = reasons[status] or 'You cannot claim this day.', state = buildState(src) }
     end
@@ -245,22 +247,29 @@ end)
 -- Chat messages
 ---------------------------------------------------------------------------
 
+--- True while any treat can still be claimed (the month plus the grace period after it).
+local function isRunning(index)
+    return index >= 1 and index <= TOTAL_DAYS + graceDays()
+end
+
 RegisterNetEvent('lcrp_halloween:server:loaded', function()
     local src = source
     if not Config.JoinMessage or welcomed[src] then return end
     welcomed[src] = true
 
-    local _, today, phase = calendarNow()
-    if phase ~= 'active' then return end
+    local _, index = calendarNow()
+    if not isRunning(index) then return end
 
     local state = buildState(src)
     local available = state and countAvailable(state) or 0
     local cmd = '/' .. Config.Command
 
     if available > 0 then
-        chat(src, ('The Halloween calendar is open! You have %d unclaimed treat%s waiting. Type %s to claim.')
-            :format(available, available == 1 and '' or 's', cmd))
-    elseif today < TOTAL_DAYS then
+        local expiring = index > 1 and state.days[index - 1] and state.days[index - 1].status == 'available'
+        chat(src, ('You have %d unclaimed Halloween treat%s waiting%s. Type %s to claim.'):format(
+            available, available == 1 and '' or 's',
+            expiring and ' (yesterday\'s expires at midnight)' or '', cmd))
+    elseif index < TOTAL_DAYS then
         chat(src, ('You have claimed every treat so far. Come back tomorrow, or type %s to see the countdown.'):format(cmd))
     end
 end)
@@ -276,16 +285,16 @@ if Config.Broadcast.enabled then
         local interval = math.max(1, Config.Broadcast.intervalMinutes) * 60000
         while true do
             Wait(interval)
-            local _, today, phase = calendarNow()
-            if phase == 'active' then
-                local cmd = '/' .. Config.Command
-                if today >= TOTAL_DAYS then
-                    chat(-1, ('Happy Halloween! The grand prize is waiting for you. Type %s to claim it.'):format(cmd))
-                else
-                    local left = TOTAL_DAYS - today
-                    chat(-1, ('%d day%s until Halloween! Type %s to claim today\'s treat.')
-                        :format(left, left == 1 and '' or 's', cmd))
-                end
+            local _, index = calendarNow()
+            local cmd = '/' .. Config.Command
+            if index >= 1 and index < TOTAL_DAYS then
+                local left = TOTAL_DAYS - index
+                chat(-1, ('%d day%s until Halloween! Type %s to claim today\'s treat. Don\'t wait, treats expire!')
+                    :format(left, left == 1 and '' or 's', cmd))
+            elseif index == TOTAL_DAYS then
+                chat(-1, ('Happy Halloween! The grand prize is waiting for you. Type %s to claim it.'):format(cmd))
+            elseif isRunning(index) then
+                chat(-1, ('Last chance! The Halloween grand prize can still be claimed with %s.'):format(cmd))
             end
         end
     end)

@@ -11,13 +11,14 @@ Config.Month = 10
 -- resets automatically next October.
 Config.Year = nil
 
--- true  = players who miss a day can still claim it later in the month.
--- false = each day can only be claimed on that day.
-Config.AllowCatchUp = true
+-- How many extra days a treat stays claimable after its own day.
+-- 1 = today's treat plus yesterday's as a grace period. 0 = today only.
+-- Anything older is missed for good.
+Config.GraceDays = 1
 
--- 'license'   = one calendar per Rockstar license (stops alt-character farming).
 -- 'citizenid' = one calendar per character.
-Config.TrackBy = 'license'
+-- 'license'   = one calendar per Rockstar license, shared by all characters.
+Config.TrackBy = 'citizenid'
 
 -- Testing only: set to a number (1-31) to pretend it is that day of the month.
 -- Leave nil on the live server.
@@ -64,7 +65,7 @@ Config.Days = {
     [23] = { { item = 'firework4', count = 2 } },
     [24] = { { item = 'burger', count = 3 }, { item = 'cola_drink', count = 3 } },
     [25] = { { money = 2500 } },
-    [26] = { { item = 'knife', count = 1 } },
+    [26] = { { item = 'WEAPON_KNIFE', count = 1 } },
     [27] = { { item = 'vodka', count = 1 }, { item = 'whiskey', count = 1 } },
     [28] = { { item = 'repair_kit', count = 3 }, { item = 'gauze', count = 5 } },
     [29] = {

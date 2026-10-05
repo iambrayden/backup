@@ -6,10 +6,10 @@ Halloween countdown and daily reward calendar for Last Chance Roleplay (Qbox + o
 
 - `/halloween` opens a NUI calendar with a live countdown to Halloween and to the next treat.
 - 31 daily rewards (Oct 1–31). Day 31 is the grand prize.
-- Missed days can be claimed later in the month (`Config.AllowCatchUp`).
+- Each treat can only be claimed on its own day, plus one grace day after it (`Config.GraceDays`). After that it expires. The Oct 31 grand prize stays claimable through Nov 1.
 - Chat message when a character loads, telling the player how many treats are waiting.
 - Chat broadcast to everyone every hour (`Config.Broadcast`).
-- Claims are stored in MySQL per Rockstar license by default, so alt characters can't claim twice.
+- Claims are stored in MySQL per character (citizenid).
 - Every claim is checked on the server. Rewards are only given when the claim row is inserted, so double clicks or spammed requests can't pay out twice.
 
 ## Install
@@ -25,8 +25,8 @@ Everything lives in `config.lua`:
 | Option | Default | What it does |
 |---|---|---|
 | `Command` | `halloween` | Chat command that opens the calendar |
-| `AllowCatchUp` | `true` | Allow claiming missed days later in October |
-| `TrackBy` | `license` | `license` = one calendar per player, `citizenid` = per character |
+| `GraceDays` | `1` | Extra days a treat stays claimable after its own day (`0` = same day only) |
+| `TrackBy` | `citizenid` | `citizenid` = one calendar per character, `license` = one per player |
 | `DebugDay` | `nil` | Set to 1–31 to test a specific day. **Leave nil on live.** |
 | `JoinMessage` | `true` | Chat message when a character loads |
 | `Broadcast` | every 60 min | Server-wide chat reminder |

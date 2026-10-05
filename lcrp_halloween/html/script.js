@@ -6,7 +6,7 @@ const FALLBACK_EMOJI = {
     money: '💵',
     firework1: '🎆', firework2: '🎆', firework3: '🎆', firework4: '🎆',
     WEAPON_FLASHLIGHT: '🔦',
-    knife: '🔪',
+    WEAPON_KNIFE: '🔪',
     fishing_rod: '🎣', fishing_kit: '🧰',
     metal_detector: '📡',
     repair_kit: '🔧',
@@ -80,9 +80,10 @@ function tick() {
     const sub = el('countdown-sub');
 
     const toHalloween = state.halloween - now;
+    const anyAvailable = state.days.some((d) => d.status === 'available');
     if (toHalloween <= 0 || state.phase === 'after') {
         main.classList.add('done');
-        main.textContent = state.phase === 'after' ? 'See you next Halloween!' : 'Happy Halloween!';
+        main.textContent = state.phase === 'after' && !anyAvailable ? 'See you next Halloween!' : 'Happy Halloween!';
     } else {
         if (main.classList.contains('done')) {
             main.classList.remove('done');
@@ -113,7 +114,9 @@ function tick() {
     } else if (state.phase === 'active') {
         sub.textContent = 'Every treat has been unlocked. Happy haunting!';
     } else if (state.phase === 'after') {
-        sub.textContent = 'The Halloween calendar has ended.';
+        sub.textContent = anyAvailable
+            ? 'Last chance! Unclaimed treats expire at midnight.'
+            : 'The Halloween calendar has ended.';
     } else {
         sub.textContent = '';
     }
@@ -184,6 +187,14 @@ function renderGrid() {
     });
 }
 
+/** Days left before an available treat expires: today's day, plus the grace period. */
+function expiryText(day) {
+    const daysLeft = (state.graceDays || 0) - (state.today - day.day);
+    if (daysLeft <= 0) return 'Last chance! Expires at midnight.';
+    if (daysLeft === 1) return 'Expires at midnight tomorrow.';
+    return `Expires in ${daysLeft} days.`;
+}
+
 function renderDetail() {
     const day = state.days[selectedDay - 1];
     if (!day) return;
@@ -210,10 +221,10 @@ function renderDetail() {
     const button = el('claim');
     const note = el('detail-note');
     const texts = {
-        available: ['Claim Treat', ''],
+        available: ['Claim Treat', expiryText(day)],
         claimed: ['Claimed', 'You already collected this treat.'],
         locked: ['Locked', `Unlocks on ${MONTH} ${day.day}.`],
-        missed: ['Missed', 'This treat can no longer be claimed.'],
+        missed: ['Expired', 'This treat has expired.'],
     };
     const [label, hint] = texts[day.status] || ['Unavailable', ''];
     button.textContent = claiming ? 'Claiming…' : label;
