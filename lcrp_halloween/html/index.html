@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Halloween Calendar</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app" class="hidden">
+        <div class="panel">
+            <div class="moon"></div>
+            <div class="bats" aria-hidden="true"><span>🦇</span><span>🦇</span><span>🦇</span></div>
+
+            <header class="header">
+                <div class="brand">
+                    <span class="pumpkin">🎃</span>
+                    <div>
+                        <p class="eyebrow">Last Chance Roleplay</p>
+                        <h1>Halloween Countdown</h1>
+                    </div>
+                </div>
+                <button class="close" id="close" title="Close (Esc)">✕</button>
+            </header>
+
+            <section class="countdown">
+                <div class="countdown-main" id="countdown-main">
+                    <div class="unit"><span id="cd-days">00</span><small>Days</small></div>
+                    <div class="unit"><span id="cd-hours">00</span><small>Hours</small></div>
+                    <div class="unit"><span id="cd-mins">00</span><small>Minutes</small></div>
+                    <div class="unit"><span id="cd-secs">00</span><small>Seconds</small></div>
+                </div>
+                <p class="countdown-sub" id="countdown-sub"></p>
+            </section>
+
+            <div class="body">
+                <div class="calendar">
+                    <div class="legend">
+                        <span><i class="dot available"></i>Ready</span>
+                        <span><i class="dot claimed"></i>Claimed</span>
+                        <span><i class="dot locked"></i>Locked</span>
+                        <span><i class="dot missed"></i>Missed</span>
+                    </div>
+                    <div class="grid" id="grid"></div>
+                </div>
+
+                <aside class="detail" id="detail">
+                    <p class="detail-eyebrow" id="detail-eyebrow"></p>
+                    <h2 id="detail-title"></h2>
+                    <ul class="rewards" id="detail-rewards"></ul>
+                    <button class="claim" id="claim">Claim</button>
+                    <p class="detail-note" id="detail-note"></p>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
