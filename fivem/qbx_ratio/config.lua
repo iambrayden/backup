@@ -17,24 +17,23 @@ Config.RefreshSeconds = 5
 Config.RequireOnDuty = true
 
 -- How players are put into categories.
--- A player's job is checked against `jobNames` first (exact job name from qbx_core/shared/jobs.lua),
--- then against `jobTypes` (the `type` field on the job, e.g. Qbox ships police as type 'leo'
--- and ambulance as type 'ems'). Anyone who matches nothing is a civilian.
--- Add your server's custom jobs (bcso, sasp, safd, etc.) here.
+-- A player's job is checked against `jobNames` (exact job name from qbx_core/shared/jobs.lua),
+-- then against `jobTypes` (the job's `type` field). Anyone who matches nothing is a civilian.
+-- jobTypes is left empty so ONLY the listed job names count; e.g. a stock 'police' job is civilian.
 Config.Categories = {
     {
         id = 'leo',
         label = 'LEO',
         color = '#3b82f6',
-        jobTypes = { 'leo' },
-        jobNames = { 'police', 'lspd', 'bcso', 'sasp', 'sheriff', 'statepolice' },
+        jobTypes = {},
+        jobNames = { 'bcso', 'sahp', 'lspd' },
     },
     {
         id = 'fire',
         label = 'Fire/EMS',
         color = '#ef4444',
-        jobTypes = { 'ems', 'fire' },
-        jobNames = { 'ambulance', 'ems', 'fire', 'safd', 'lsfd' },
+        jobTypes = {},
+        jobNames = { 'safr' },
     },
 }
 
