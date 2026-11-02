@@ -24,14 +24,14 @@ never other players' jobs.
 1. The server loops `exports.qbx_core:GetQBPlayers()`. That only includes players who have
    **loaded a character**, so people in the loading screen or on character select are not counted.
 2. For each player it reads `PlayerData.job.name`:
-   - `bcso`, `sahp`, `lspd` → **LEO**
-   - `safr` → **Fire/EMS**
+   - `police`, `bcso`, `sahp`, `lspd` → **LEO**
+   - `ambulance`, `safr` → **Fire/EMS**
    - Anything else → **Civilian**
 
    (Each category also has an optional `jobTypes` list that matches the job's `type` field.
    It's empty by default, so only the job names above count.)
-3. If `Config.RequireOnDuty = true` (default), an **off-duty** cop/medic counts as a civilian,
-   because they aren't working at the moment.
+3. On-duty and **off-duty** players both count toward their job's category
+   (`Config.RequireOnDuty = false`). Set it to `true` to count off-duty players as civilians instead.
 
 Adding a department later? Add its job name to the matching `jobNames` list in `config.lua`.
 
